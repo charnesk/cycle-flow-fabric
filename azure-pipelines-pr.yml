@@ -1,0 +1,71 @@
+# Pull Request validation pipeline
+trigger: none
+
+pr:
+  branches:
+    include:
+      - main
+      - dev
+  paths:
+    exclude:
+      - README.md
+      - docs/*
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  NODE_VERSION: '20.x'
+  TERRAFORM_VERSION: '1.6.0'
+
+stages:
+  - stage: Validate
+    displayName: 'PR Validation'
+    jobs:
+      - job: LintAndTest
+        displayName: 'Lint and Test'
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: $(NODE_VERSION)
+            displayName: 'Install Node.js'
+
+          - script: |
+              npm ci
+              npm run lint
+              npm run test -- --watchAll=false --coverage
+            displayName: 'Lint and test'
+
+          - task: PublishCodeCoverageResults@1
+            inputs:
+              codeCoverageTool: 'Cobertura'
+              summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage/cobertura-coverage.xml'
+            displayName: 'Publish code coverage'
+
+      - job: TerraformValidate
+        displayName: 'Terraform Validation'
+        steps:
+          - task: TerraformInstaller@0
+            inputs:
+              terraformVersion: $(TERRAFORM_VERSION)
+            displayName: 'Install Terraform'
+
+          - script: |
+              cd terraform
+              terraform init -backend=false
+              terraform fmt -check=true -recursive
+              terraform validate
+            displayName: 'Terraform format and validate'
+
+      - job: SecurityScan
+        displayName: 'Security Scanning'
+        steps:
+          - script: |
+              npm audit --audit-level=moderate
+            displayName: 'NPM Audit'
+
+          - task: WhiteSource@21
+            inputs:
+              cwd: '$(System.DefaultWorkingDirectory)'
+            displayName: 'WhiteSource security scan'
+            continueOnError: true
